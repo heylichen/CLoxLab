@@ -7,6 +7,7 @@
 
 #include "chunk.h"
 #include "value.h"
+#include "table.h"
 #define STACK_MAX 256
 
 typedef enum {
@@ -22,6 +23,8 @@ typedef struct {
     uint8_t* ip;
     Value stack[STACK_MAX];
     Value* stackTop;
+    //hash table
+    Table strings;
     //keep track of all objects for freeing them
     Obj* objects;
 } VM;
