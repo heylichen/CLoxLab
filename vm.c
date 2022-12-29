@@ -2,23 +2,29 @@
 // Created by lc on 2022/12/7.
 //
 #include <stdio.h>
+#include <string.h>
 #include <stdarg.h>
 #include "common.h"
 #include "vm.h"
 #include "debug.h"
 #include "compiler.h"
+#include "object.h"
+#include "memory.h"
 
 VM vm;
 
 static void resetStack();
+static void concatenate();
 
 void print_stack();
 
 void initVM() {
     resetStack();
+    vm.objects = NULL;
 }
 
 void freeVM() {
+    freeObjects();
 }
 
 static void resetStack() {
@@ -109,7 +115,20 @@ static InterpretResult run() {
             }
             case OP_GREATER:  BINARY_OP(BOOL_VAL, >); break;
             case OP_LESS:     BINARY_OP(BOOL_VAL, <); break;
-            case OP_ADD:      BINARY_OP(NUMBER_VAL, +); break;
+            case OP_ADD: {
+                if (IS_STRING(peek(0)) && IS_STRING(peek(1))) {
+                    concatenate();
+                } else if (IS_NUMBER(peek(0)) && IS_NUMBER(peek(1))) {
+                    double b = AS_NUMBER(pop());
+                    double a = AS_NUMBER(pop());
+                    push(NUMBER_VAL(a + b));
+                } else {
+                    runtimeError(
+                            "Operands must be two numbers or two strings.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                break;
+            }
             case OP_SUBTRACT: BINARY_OP(NUMBER_VAL, -); break;
             case OP_MULTIPLY: BINARY_OP(NUMBER_VAL, *); break;
             case OP_DIVIDE:   BINARY_OP(NUMBER_VAL, /); break;
@@ -127,6 +146,8 @@ static InterpretResult run() {
 #undef READ_BYTE
 #undef BINARY_OP
 }
+
+
 
 void push(Value value) {
     *vm.stackTop = value;
@@ -146,4 +167,18 @@ void print_stack() {
         printf(" ]");
     }
     printf("\n");
+}
+
+static void concatenate() {
+    ObjString* b = AS_STRING(pop());
+    ObjString* a = AS_STRING(pop());
+
+    int length = a->length + b->length;
+    char* chars = ALLOCATE(char, length + 1);
+    memcpy(chars, a->chars, a->length);
+    memcpy(chars + a->length, b->chars, b->length);
+    chars[length] = '\0';
+
+    ObjString* result = takeString(chars, length);
+    push(OBJ_VAL(result));
 }

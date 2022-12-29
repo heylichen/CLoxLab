@@ -3,4 +3,4 @@ project(CLoxLab)
 
 set(CMAKE_C_STANDARD 17)
 
-add_executable(CLoxLab main.c chunk.c chunk.h debug.c debug.h memory.h memory.c value.h value.c vm.h vm.c compiler.h compiler.c scanner.h scanner.c)
+add_executable(CLoxLab main.c chunk.c chunk.h debug.c debug.h memory.h memory.c value.h value.c vm.h vm.c compiler.h compiler.c scanner.h scanner.c object.h object.c)
