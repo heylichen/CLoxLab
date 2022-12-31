@@ -188,6 +188,7 @@ static TokenType identifierType() {
             }
             break;
     }
+    return TOKEN_IDENTIFIER;
 }
 
 static Token identifier() {

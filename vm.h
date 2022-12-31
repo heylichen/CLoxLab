@@ -23,6 +23,8 @@ typedef struct {
     uint8_t* ip;
     Value stack[STACK_MAX];
     Value* stackTop;
+    //global variables
+    Table globals;
     //hash table
     Table strings;
     //keep track of all objects for freeing them
