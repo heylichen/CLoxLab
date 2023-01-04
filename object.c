@@ -37,6 +37,7 @@ static Obj* allocateObject(size_t size, ObjType type) {
  * @return
  */
 static ObjString* allocateString(char* chars, int length, uint32_t hash) {
+    //allocate ObjString struct on heap
     ObjString* string = ALLOCATE_OBJ(ObjString, OBJ_STRING);
     string->length = length;
     string->chars = chars;
@@ -63,12 +64,14 @@ static uint32_t hashString(const char* key, int length) {
  * @return
  */
 ObjString* copyString(const char* chars, int length) {
+    //calculate hash
     uint32_t hash = hashString(chars, length);
     //intern string
-    ObjString* interned = tableFindString(&vm.strings, chars, length,
-                                          hash);
+    ObjString* interned = tableFindString(&vm.strings, chars, length, hash);
+    // if already interned, return
     if (interned != NULL) return interned;
 
+    //not interned, allocate new string and copy it
     char* heapChars = ALLOCATE(char, length + 1);
     memcpy(heapChars, chars, length);
     heapChars[length] = '\0';
