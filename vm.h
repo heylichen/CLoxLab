@@ -8,7 +8,19 @@
 #include "chunk.h"
 #include "value.h"
 #include "table.h"
-#define STACK_MAX 256
+#include "object.h"
+
+#define FRAMES_MAX 64
+#define STACK_MAX (FRAMES_MAX * UINT8_COUNT)
+
+typedef struct {
+    // the function being called
+    ObjFunction* function;
+
+    uint8_t* ip;
+    // first slot of this function call in vm.stack
+    Value* slots;
+} CallFrame;
 
 typedef enum {
     INTERPRET_OK,
@@ -18,9 +30,10 @@ typedef enum {
 
 
 typedef struct {
-    Chunk* chunk;
-    //instruction pointer
-    uint8_t* ip;
+
+    CallFrame frames[FRAMES_MAX];
+    int frameCount;
+
     Value stack[STACK_MAX];
     Value* stackTop;
     //global variables
