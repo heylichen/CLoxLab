@@ -18,6 +18,7 @@ typedef enum {
     OBJ_UPVALUE,
     OBJ_CLASS,
     OBJ_INSTANCE,
+    OBJ_BOUND_METHOD,
 } ObjType;
 
 struct Obj {
@@ -62,6 +63,7 @@ typedef struct {
 typedef struct {
     Obj obj;
     ObjString* name;
+    Table methods;
 } ObjClass;
 
 typedef struct {
@@ -69,6 +71,13 @@ typedef struct {
     ObjClass* klass;
     Table fields;
 } ObjInstance;
+
+typedef struct {
+    Obj obj;
+    // the instance
+    Value receiver;
+    ObjClosure* method;
+} ObjBoundMethod;
 
 typedef Value (*NativeFn)(int argCount, Value* args);
 
@@ -109,6 +118,11 @@ ObjClass* newClass(ObjString* name);
 #define IS_INSTANCE(value)     isObjType(value, OBJ_INSTANCE)
 #define AS_INSTANCE(value)     ((ObjInstance*)AS_OBJ(value))
 ObjInstance* newInstance(ObjClass* klass);
+
+#define IS_BOUND_METHOD(value) isObjType(value, OBJ_BOUND_METHOD)
+#define AS_BOUND_METHOD(value) ((ObjBoundMethod*)AS_OBJ(value))
+ObjBoundMethod* newBoundMethod(Value receiver,
+                               ObjClosure* method);
 
 ObjString* copyString(const char* chars, int length);
 

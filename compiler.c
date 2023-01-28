@@ -51,7 +51,9 @@ typedef struct {
 
 typedef enum {
     TYPE_FUNCTION,
-    TYPE_SCRIPT
+    TYPE_SCRIPT,
+    TYPE_METHOD,
+    TYPE_INITIALIZER,
 } FunctionType;
 
 
@@ -68,9 +70,14 @@ typedef struct Compiler {
     Upvalue upvalues[UINT8_COUNT];
 } Compiler;
 
+typedef struct ClassCompiler {
+    struct ClassCompiler* enclosing;
+} ClassCompiler;
+
 
 Parser parser;
 Compiler *current = NULL;
+ClassCompiler *currentClass = NULL;
 
 static Chunk *currentChunk() {
     return &current->function->chunk;
@@ -124,6 +131,10 @@ static void declareVariable();
 
 static void defineVariable(uint8_t global);
 
+static void function(FunctionType type);
+
+static void namedVariable(Token name, bool canAssign);
+
 ObjFunction* compile(const char* source) {
     initScanner(source);
 
@@ -142,16 +153,62 @@ ObjFunction* compile(const char* source) {
     return parser.hadError ? NULL : function;
 }
 
+/**
+ * 1) function(type) 生成 OP_CLOSURE，运行时会把指向 ObjClosure的Value push到stack <br>
+ * 2) 生成OP_METHOD指令
+ */
+static void method() {
+    consume(TOKEN_IDENTIFIER, "Expect method name.");
+    //allocate an ObjString and add it to constant table, for method name
+    uint8_t constant = identifierConstant(&parser.previous);
+
+    FunctionType type = TYPE_METHOD;
+    if (parser.previous.length == 4 &&
+        memcmp(parser.previous.start, "init", 4) == 0) {
+        type = TYPE_INITIALIZER;
+    }
+    // 编译 时 生成 OP_CLOSURE
+    // 运行时 ， 会把指向 ObjClosure的Value push到stack
+    function(type);
+
+    emitBytes(OP_METHOD, constant);
+}
+
 static void classDeclaration() {
     consume(TOKEN_IDENTIFIER, "Expect class name.");
+    Token className = parser.previous;
+
+    //allocate an ObjString and add it to constant table
     uint8_t nameConstant = identifierConstant(&parser.previous);
+    //for global variable , do nothing, leave out for Local variable
     declareVariable();
 
+    //at runtime, create ObjClass
     emitBytes(OP_CLASS, nameConstant);
+    //for global variable , emit OP_DEFINE_GLOBAL, leave out for Local variable
     defineVariable(nameConstant);
 
+    ClassCompiler classCompiler;
+    classCompiler.enclosing = currentClass;
+    currentClass = &classCompiler;
+
+    //actually a GET OP, at runtime push the class obj on stack,
+    // which will be useful for OP_METHOD at runtime
+    namedVariable(className, false);
+
+    // 生成任意个数的OP_METHOD指令
     consume(TOKEN_LEFT_BRACE, "Expect '{' before class body.");
+    while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+        //1 OP_CLOSURE 运行时会把指向 ObjClosure的Value push到stack
+        //2 生成OP_METHOD指令
+        method();
+    }
     consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body.");
+
+    // pop class obj
+    emitByte(OP_POP);
+
+    currentClass = currentClass->enclosing;
 }
 
 static void declaration() {
@@ -277,6 +334,11 @@ static void block() {
     consume(TOKEN_RIGHT_BRACE, "Expect '}' after block.");
 }
 
+/**
+ * 编译 时 生成 OP_CLOSURE
+ * 运行时 ， 会把指向 ObjClosure的Value push到stack
+ * @param type
+ */
 static void function(FunctionType type) {
     Compiler compiler;
     initCompiler(&compiler, type);
@@ -474,6 +536,9 @@ static void returnStatement() {
     if (match(TOKEN_SEMICOLON)) {
         emitReturn();
     } else {
+        if (current->type == TYPE_INITIALIZER) {
+            error("Can't return a value from an initializer.");
+        }
         expression();
         consume(TOKEN_SEMICOLON, "Expect ';' after return value.");
         emitByte(OP_RETURN);
@@ -600,7 +665,13 @@ static void error(const char *message) {
 static void emitReturn() {
     // a function can implicitly return by reaching the end of its body
     // The language is specified to implicitly return nil in that case.
-    emitByte(OP_NIL);
+    if (current->type == TYPE_INITIALIZER) {
+        //init always return this, so emit get instruction
+        emitBytes(OP_GET_LOCAL, 0);
+    } else {
+        emitByte(OP_NIL);
+    }
+
     emitByte(OP_RETURN);
 }
 
@@ -798,6 +869,11 @@ static int resolveUpvalue(Compiler* compiler, Token* name) {
     return -1;
 }
 
+/**
+ * generate OP_GET* OR OP_SET* instruction
+ * @param name
+ * @param canAssign
+ */
 static void namedVariable(Token name, bool canAssign) {
     uint8_t getOp, setOp;
     int arg = resolveLocal(current, &name);
@@ -820,6 +896,10 @@ static void namedVariable(Token name, bool canAssign) {
     }
 }
 
+/**
+ * generate OP_GET* OR OP_SET* instruction
+ * @param canAssign
+ */
 static void variable(bool canAssign) {
     namedVariable(parser.previous, canAssign);
 }
@@ -880,6 +960,15 @@ static void dot(bool canAssign) {
     }
 }
 
+static void this_(bool canAssign) {
+    if (currentClass == NULL) {
+        error("Can't use 'this' outside of a class.");
+        return;
+    }
+
+    variable(false);
+}
+
 ParseRule rules[] = {
         [TOKEN_LEFT_PAREN]    = {grouping,  call,   PREC_CALL},
         [TOKEN_RIGHT_PAREN]   = {NULL, NULL, PREC_NONE},
@@ -915,7 +1004,7 @@ ParseRule rules[] = {
         [TOKEN_PRINT]         = {NULL, NULL, PREC_NONE},
         [TOKEN_RETURN]        = {NULL, NULL, PREC_NONE},
         [TOKEN_SUPER]         = {NULL, NULL, PREC_NONE},
-        [TOKEN_THIS]          = {NULL, NULL, PREC_NONE},
+        [TOKEN_THIS]          = {this_,    NULL,   PREC_NONE},
         [TOKEN_TRUE]          = {literal, NULL, PREC_NONE},
         [TOKEN_VAR]           = {NULL, NULL, PREC_NONE},
         [TOKEN_WHILE]         = {NULL, NULL, PREC_NONE},
@@ -982,8 +1071,13 @@ static void initCompiler(Compiler *compiler, FunctionType type) {
     Local* local = &current->locals[current->localCount++];
     local->depth = 0;
     local->isCaptured = false;
-    local->name.start = "";
-    local->name.length = 0;
+    if (type != TYPE_FUNCTION) {
+        local->name.start = "this";
+        local->name.length = 4;
+    } else {
+        local->name.start = "";
+        local->name.length = 0;
+    }
 }
 
 void markCompilerRoots() {

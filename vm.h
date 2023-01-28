@@ -42,6 +42,9 @@ typedef struct {
     Table strings;
     //keep track of all objects for freeing them
     Obj* objects;
+    //init method name, "init"
+    ObjString* initString;
+
     // list of all open upvalues that point to variables still on the stack
     ObjUpvalue* openUpvalues;
     //GC, tracing worklist
