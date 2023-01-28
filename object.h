@@ -8,16 +8,23 @@
 #include "common.h"
 #include "value.h"
 #include "chunk.h"
+#include "table.h"
 
 typedef enum {
     OBJ_STRING,
     OBJ_FUNCTION,
     OBJ_NATIVE,
+    OBJ_CLOSURE,
+    OBJ_UPVALUE,
+    OBJ_CLASS,
+    OBJ_INSTANCE,
 } ObjType;
 
 struct Obj {
     ObjType type;
     struct Obj* next;
+    //for GC, mark sweep, mark phase
+    bool isMarked;
 };
 
 struct ObjString {
@@ -30,9 +37,38 @@ struct ObjString {
 typedef struct {
     Obj obj;
     int arity;
+    int upvalueCount;
     Chunk chunk;
     ObjString* name;
 } ObjFunction;
+
+typedef struct ObjUpvalue {
+    Obj obj;
+    Value* location;
+
+    Value closed;
+    //track list
+    struct ObjUpvalue* next;
+} ObjUpvalue;
+
+typedef struct {
+    Obj obj;
+    ObjFunction* function;
+
+    ObjUpvalue** upvalues;
+    int upvalueCount;
+} ObjClosure;
+
+typedef struct {
+    Obj obj;
+    ObjString* name;
+} ObjClass;
+
+typedef struct {
+    Obj obj;
+    ObjClass* klass;
+    Table fields;
+} ObjInstance;
 
 typedef Value (*NativeFn)(int argCount, Value* args);
 
@@ -44,6 +80,7 @@ typedef struct {
 
 ObjFunction* newFunction();
 ObjNative* newNative(NativeFn function);
+ObjClosure* newClosure(ObjFunction* function);
 
 static inline bool isObjType(Value value, ObjType type) {
     return IS_OBJ(value) && AS_OBJ(value)->type == type;
@@ -62,7 +99,20 @@ static inline bool isObjType(Value value, ObjType type) {
 #define AS_NATIVE(value) \
     (((ObjNative*)AS_OBJ(value))->function)
 
+#define IS_CLOSURE(value)      isObjType(value, OBJ_CLOSURE)
+#define AS_CLOSURE(value)      ((ObjClosure*)AS_OBJ(value))
+
+#define IS_CLASS(value)        isObjType(value, OBJ_CLASS)
+#define AS_CLASS(value)        ((ObjClass*)AS_OBJ(value))
+ObjClass* newClass(ObjString* name);
+
+#define IS_INSTANCE(value)     isObjType(value, OBJ_INSTANCE)
+#define AS_INSTANCE(value)     ((ObjInstance*)AS_OBJ(value))
+ObjInstance* newInstance(ObjClass* klass);
+
 ObjString* copyString(const char* chars, int length);
+
+ObjUpvalue* newUpvalue(Value* slot);
 
 void printObject(Value value);
 

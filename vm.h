@@ -15,7 +15,7 @@
 
 typedef struct {
     // the function being called
-    ObjFunction* function;
+    ObjClosure* closure;
 
     uint8_t* ip;
     // first slot of this function call in vm.stack
@@ -42,6 +42,15 @@ typedef struct {
     Table strings;
     //keep track of all objects for freeing them
     Obj* objects;
+    // list of all open upvalues that point to variables still on the stack
+    ObjUpvalue* openUpvalues;
+    //GC, tracing worklist
+    int grayCount;
+    int grayCapacity;
+    Obj** grayStack;
+    //for adjusting GC parameters
+    size_t bytesAllocated;
+    size_t nextGC;
 } VM;
 
 extern VM vm;
