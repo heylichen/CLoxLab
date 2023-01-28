@@ -127,6 +127,7 @@ static bool callValue(Value callee, int argCount) {
                     runtimeError("Expected 0 arguments but got %d.", argCount);
                     return false;
                 }
+                return true;
             }
             case OBJ_CLOSURE:
                 return call(AS_CLOSURE(callee), argCount);
@@ -143,6 +144,42 @@ static bool callValue(Value callee, int argCount) {
     }
     runtimeError("Can only call functions and classes.");
     return false;
+}
+
+/**
+ * just find the method's ObjClosure and call it
+ * @param klass
+ * @param name
+ * @param argCount
+ * @return
+ */
+static bool invokeFromClass(ObjClass* klass, ObjString* name, int argCount) {
+    Value method;
+    if (!tableGet(&klass->methods, name, &method)) {
+        runtimeError("Undefined property '%s'.", name->chars);
+        return false;
+    }
+    // prepare call frame
+    return call(AS_CLOSURE(method), argCount);
+}
+
+static bool invoke(ObjString* name, int argCount) {
+    //get instance, instance is at the right slot
+    Value receiver = peek(argCount);
+    if (!IS_INSTANCE(receiver)) {
+        runtimeError("Only instances have methods.");
+        return false;
+    }
+    ObjInstance* instance = AS_INSTANCE(receiver);
+
+    // if invoke on a field, check and call
+    Value value;
+    if (tableGet(&instance->fields, name, &value)) {
+        vm.stackTop[-argCount - 1] = value;
+        return callValue(value, argCount);
+    }
+
+    return invokeFromClass(instance->klass, name, argCount);
 }
 
 static void runtimeError(const char *format, ...) {
@@ -230,6 +267,13 @@ static void defineMethod(ObjString* name) {
     pop();
 }
 
+/**
+ * 找到ObjClass中的Method, 将 stack上的instance和找到的method包装为ObjBoundMethod
+ * stack pop instance, push ObjBoundMethod
+ * @param klass
+ * @param name
+ * @return
+ */
 static bool bindMethod(ObjClass* klass, ObjString* name) {
     Value method;
     if (!tableGet(&klass->methods, name, &method)) {
@@ -277,6 +321,15 @@ static InterpretResult run() {
 #endif
         uint8_t instruction;
         switch (instruction = READ_BYTE()) {
+            case OP_INVOKE: {
+                ObjString* method = READ_STRING();
+                int argCount = READ_BYTE();
+                if (!invoke(method, argCount)) {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                frame = &vm.frames[vm.frameCount - 1];
+                break;
+            }
             case OP_METHOD:
                 defineMethod(READ_STRING());
                 break;
