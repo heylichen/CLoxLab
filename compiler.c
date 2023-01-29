@@ -72,6 +72,7 @@ typedef struct Compiler {
 
 typedef struct ClassCompiler {
     struct ClassCompiler* enclosing;
+    bool hasSuperclass;
 } ClassCompiler;
 
 
@@ -123,6 +124,8 @@ static void funDeclaration();
 
 static void beginScope();
 
+static void endScope();
+
 static void emitReturn();
 
 static uint8_t identifierConstant(Token *name);
@@ -134,6 +137,14 @@ static void defineVariable(uint8_t global);
 static void function(FunctionType type);
 
 static void namedVariable(Token name, bool canAssign);
+
+static void variable(bool canAssign);
+
+static bool identifiersEqual(Token* a, Token* b);
+
+static void addLocal(Token name);
+
+static Token syntheticToken(const char* text);
 
 ObjFunction* compile(const char* source) {
     initScanner(source);
@@ -189,8 +200,31 @@ static void classDeclaration() {
     defineVariable(nameConstant);
 
     ClassCompiler classCompiler;
+    classCompiler.hasSuperclass = false;
     classCompiler.enclosing = currentClass;
     currentClass = &classCompiler;
+
+    // detect super class, eg: class Cruller < Doughnut
+    if (match(TOKEN_LESS)) {
+        consume(TOKEN_IDENTIFIER, "Expect superclass name.");
+        if (identifiersEqual(&className, &parser.previous)) {
+            error("A class can't inherit from itself.");
+        }
+        // emit instruction, load super class on stack
+        variable(false);
+
+        beginScope();
+        // make super class obj a Local, so at runtime can access it as a Local
+        addLocal(syntheticToken("super"));
+        defineVariable(0);
+
+        // emit instruction, load current class on stack
+        namedVariable(className, false);
+        emitByte(OP_INHERIT);
+
+        classCompiler.hasSuperclass = true;
+    }
+
 
     //actually a GET OP, at runtime push the class obj on stack,
     // which will be useful for OP_METHOD at runtime
@@ -207,6 +241,10 @@ static void classDeclaration() {
 
     // pop class obj
     emitByte(OP_POP);
+
+    if (classCompiler.hasSuperclass) {
+        endScope();
+    }
 
     currentClass = currentClass->enclosing;
 }
@@ -973,6 +1011,35 @@ static void this_(bool canAssign) {
     variable(false);
 }
 
+static void super_(bool canAssign) {
+    if (currentClass == NULL) {
+        error("Can't use 'super' outside of a class.");
+    } else if (!currentClass->hasSuperclass) {
+        error("Can't use 'super' in a class with no superclass.");
+    }
+
+    consume(TOKEN_DOT, "Expect '.' after 'super'.");
+    consume(TOKEN_IDENTIFIER, "Expect superclass method name.");
+    // make superclass method name a constant
+    uint8_t name = identifierConstant(&parser.previous);
+
+    //emit bytecode to load instance. instance is a Local at call frame [0]
+    namedVariable(syntheticToken("this"), false);
+    if (match(TOKEN_LEFT_PAREN)) {
+        //faster super call
+        uint8_t argCount = argumentList();
+        namedVariable(syntheticToken("super"), false);
+        emitBytes(OP_SUPER_INVOKE, name);
+        emitByte(argCount);
+    } else {
+        //emit bytecode to load super class. at class declaration compile time, we make super a Local
+        namedVariable(syntheticToken("super"), false);
+        // super class 和 name (super class method name)2个信息合起来指定了ObjClosure
+        emitBytes(OP_GET_SUPER, name);
+    }
+
+}
+
 ParseRule rules[] = {
         [TOKEN_LEFT_PAREN]    = {grouping,  call,   PREC_CALL},
         [TOKEN_RIGHT_PAREN]   = {NULL, NULL, PREC_NONE},
@@ -1007,7 +1074,7 @@ ParseRule rules[] = {
         [TOKEN_OR]            = {NULL, or_,    PREC_OR},
         [TOKEN_PRINT]         = {NULL, NULL, PREC_NONE},
         [TOKEN_RETURN]        = {NULL, NULL, PREC_NONE},
-        [TOKEN_SUPER]         = {NULL, NULL, PREC_NONE},
+        [TOKEN_SUPER]         = {super_,   NULL,   PREC_NONE},
         [TOKEN_THIS]          = {this_,    NULL,   PREC_NONE},
         [TOKEN_TRUE]          = {literal, NULL, PREC_NONE},
         [TOKEN_VAR]           = {NULL, NULL, PREC_NONE},
@@ -1090,4 +1157,11 @@ void markCompilerRoots() {
         markObject((Obj*)compiler->function);
         compiler = compiler->enclosing;
     }
+}
+
+static Token syntheticToken(const char* text) {
+    Token token;
+    token.start = text;
+    token.length = (int)strlen(text);
+    return token;
 }

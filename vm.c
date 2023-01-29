@@ -321,6 +321,45 @@ static InterpretResult run() {
 #endif
         uint8_t instruction;
         switch (instruction = READ_BYTE()) {
+            case OP_SUPER_INVOKE: {
+                //faster super call
+                ObjString* method = READ_STRING();
+                int argCount = READ_BYTE();
+                ObjClass* superclass = AS_CLASS(pop());
+                if (!invokeFromClass(superclass, method, argCount)) {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                frame = &vm.frames[vm.frameCount - 1];
+                break;
+            }
+            case OP_GET_SUPER: {
+                ObjString* name = READ_STRING();
+                // peek(0): super class, peek(1): instance
+                // pop super class, leave the instance on stack top, for bindMethod usage
+                ObjClass* superclass = AS_CLASS(pop());
+
+                if (!bindMethod(superclass, name)) {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                break;
+            }
+            case OP_INHERIT: {
+                Value superclass = peek(1);
+                ObjClass* subclass = AS_CLASS(peek(0));
+
+                if (!IS_CLASS(superclass)) {
+                    runtimeError("Superclass must be a class.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                // copy from super methods
+                tableAddAll(&AS_CLASS(superclass)->methods, &subclass->methods);
+                pop(); // Subclass.
+                // leave super class on stack top, why?
+                // because at compile time(classDeclaration), we make super class a Local,
+                // it must stay on the corresponding stack slot at runtime.
+                break;
+            }
             case OP_INVOKE: {
                 ObjString* method = READ_STRING();
                 int argCount = READ_BYTE();
